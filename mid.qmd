@@ -1,6 +1,6 @@
 ---
 title: "Characterizing Automobiles"
-author: "Your Name Here"
+author: "Tatum Good"
 date: "03/17/2025"
 
 format: 
@@ -41,6 +41,9 @@ head(Auto)
 ```{r df2}
 names(Auto)
 ```
+```{r}
+str(Auto)
+```
 
 # Multiple Regression
 
@@ -48,10 +51,18 @@ names(Auto)
 - Compute and comment on the RMSE.
 
 ```{r regression}
-# Your code here
+model <- lm(mpg ~ horsepower + year, data = Auto)
+
+summary(model)
+
+predictions <- predict(model, newdata = Auto)
+
+rmse <- sqrt(mean((Auto$mpg - predictions)^2))
+print(paste("RMSE:", round(rmse, 2)))
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+> *Explain*
+> This model gives us a RMSE of 4.37. Since the mpg values in our Auto dataset extend from 10 to 46m an RMSE of 4.37 could suggest a moderate level of prediction error. The model alos explains a 68.55% of variability which suggests a fairly strong relationship. Some additional observations are that Horsepower seems to have a negative impact on mpg and it looks like as horsepower increases, fuel efficiency decreases while Year has a positive impact. This makes sense as newer cars probably have a higher fuel efficiency.
 
 # Feature Engineering
 
@@ -61,10 +72,46 @@ names(Auto)
 - Compute and comment on the RMSE.
 
 ```{r features}
-# Your code here
+auto <- Auto %>%
+  mutate(
+    power_to_weight = horsepower / weight, #how much horsepower the car has per unit of weight
+    acc_to_weight = acceleration / weight, #how responsive the car is in relation to its weight
+    displacement_per_cyl = displacement / cylinders, #avg engine displacement per cylinder
+    hp_per_cyl = horsepower / cylinders, #power distribution across the engine
+    weight_per_cyl = weight / cylinders, #how much weight each engine cylinder is carrying
+    car_age = max(year) - year, #how old the car is relative to the newest car in the dataset
+    efficiency_score = mpg / horsepower, #how many mpg the car gets per unit of horsepower
+    weight_to_displacement = weight / displacement, #how heavy the car to its engine size
+    acceleration_efficiency = mpg / acceleration, #how efficient car converts acceleration into fuel economy
+    performance_index = (horsepower * acceleration) / weight #measure of horsepower and acceleration using vehicle weight
+  )
+
+#remove rows with missing values
+auto <- na.omit(auto)
+
+#only mpg and new features
+final_data <- auto %>%
+  select(mpg, power_to_weight, acc_to_weight, displacement_per_cyl, hp_per_cyl, 
+         weight_per_cyl, car_age, efficiency_score, weight_to_displacement, 
+         acceleration_efficiency, performance_index)
+
+head(final_data)
+```
+```{r}
+#linear regression model using the 10features
+model <- lm(mpg ~ ., data = final_data)
+
+#predict mpg
+predictions <- predict(model, newdata = final_data)
+
+#RMSE
+rmse_value <- RMSE(predictions, final_data$mpg)
+
+print(paste("RMSE:", round(rmse_value, 2)))
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+> *Explain*
+> The RMSE for this model is 0.66 which indicates a VERY low possibility for error which means the model fits our data very well. That being said, with an error so small is it possible that the model might be overfitting to the training data which means it might perform worse on unseen data.
 
 # Classification
 
@@ -73,10 +120,42 @@ names(Auto)
 - Report on your Kappa value.
 
 ```{r classification}
-# Your code here
+#(1 = chevrolet, 0 = honda)
+Auto <- Auto %>%
+  mutate(brand = ifelse(grepl("chevrolet", name), "chevrolet", 
+                        ifelse(grepl("honda", name), "honda", NA))) %>%
+  drop_na(brand)  # Remove rows that are neither
+
+#brand column into a factor
+Auto$brand <- as.factor(Auto$brand)
+
+#only numeric features
+Auto_knn <- Auto %>%
+  select(-name, -origin)
+
+#normalize
+normalize <- function(x) (x - min(x)) / (max(x) - min(x))
+Auto_knn[,-which(names(Auto_knn) == "brand")] <- as.data.frame(lapply(Auto_knn[,-which(names(Auto_knn) == "brand")], normalize))
+
+#split train and test
+set.seed(123)
+trainIndex <- createDataPartition(Auto_knn$brand, p = 0.8, list = FALSE)
+trainData <- Auto_knn[trainIndex, ]
+testData <- Auto_knn[-trainIndex, ]
+
+#knn
+knn_pred <- knn(train = trainData[, -which(names(trainData) == "brand")], 
+                test = testData[, -which(names(testData) == "brand")], 
+                cl = trainData$brand, k = 5)
+
+conf_matrix <- confusionMatrix(knn_pred, testData$brand)
+
+print(paste("Kappa:", round(conf_matrix$overall["Kappa"], 2)))
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+> *Explain*
+> I went with KNN because it handles numerical attributes well and I want to make a binary between honda and chevrolet. KNN will also help with classifying as it will effectively group similar cars based on the attributes given to give us the best results.
+> My model gives me a kappa of 0.74. This means the KNN model performs quite well in this classification. This model has a good level of reliability for correctly identifying the correct cars.
 
 # Binary Classification
 
@@ -85,10 +164,42 @@ names(Auto)
 - Display and comment on an ROC curve.
 
 ```{r binary classification}
-# Your code here
+library(pROC)  # For ROC curve and AUC
+
+#Honda = 1, others = 0
+Auto <- Auto %>%
+  mutate(brand = ifelse(grepl("honda", name), 1, 0)) %>%
+  drop_na(brand)
+
+Auto_logit <- Auto %>%
+  select(-name, -origin)
+
+#normalize
+normalize <- function(x) (x - min(x)) / (max(x) - min(x))
+Auto_logit[,-which(names(Auto_logit) == "brand")] <- as.data.frame(lapply(Auto_logit[,-which(names(Auto_logit) == "brand")], normalize))
+
+#split train and test
+set.seed(123)
+trainIndex <- createDataPartition(Auto_logit$brand, p = 0.8, list = FALSE)
+trainData <- Auto_logit[trainIndex, ]
+testData <- Auto_logit[-trainIndex, ]
+
+#train lr model
+logit_model <- glm(brand ~ ., data = trainData, family = binomial)
+
+pred_prob <- predict(logit_model, newdata = testData, type = "response")
+
+#ROC curve
+roc_curve <- roc(testData$brand, pred_prob)
+plot(roc_curve, main = "ROC Curve for Honda Prediction", col = "blue", lwd = 2)
+
+#AUC
+auc_value <- auc(roc_curve)
+print(paste("AUC:", round(auc_value, 2)))
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: *Explain*
+> *Explain*
+> The ROC shows the sensitivity vs specificity as different decision thresholds. This diagonal line indicates a random classifier which unfortunately means my model is making predictions no better than random chance. Since AUC is 0.5, this indicates that this model cannot effectively differentiate between classes. This indicates that this may be the wrong model choice and this model may be underfitting and poorly trained. This leaves a lot of area for improvement.
 
 # Ethics
 
@@ -99,20 +210,44 @@ names(Auto)
     - Climate Change
 - Provide at least one statistical measure for each, such as a RMSE, Kappa value, or ROC curve.
 
-> <span style="color:red;font-weight:bold">TODO</span>: Big Data and Human-Centered Computing
+> Big Data and Human-Centered Computing
+> Data scientists working with big data and human-centered computing are responsible for ensuring that data-driven technologies are fair and inclusive. Within the Clean Air Act, big data could be used to analyze air quality trends and their impacts on various communities. Data scientists need to design systems that prioritize the privacy, security, and well-being of individuals. However, they also need to use data to inform policies and solutions related to public health and environmental protection.
 
 ```{r big data}
-# Your code here
+lm_model <- lm(mpg ~ weight + horsepower + displacement, data = Auto)
+predictions <- predict(lm_model, Auto)
+rmse <- sqrt(mean((predictions - Auto$mpg)^2))
+print(rmse)
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: Democratic Institutions
+> Democratic Institutions
+> Data scientists have a responsibility to ensure that data used in democratic institutions is transparent, unbiased, and most of all accurate. The Clean Air Act often involves public and governmental participation in decision-making processes related to environmental protection. Data scientists need to provide clear and accessible insights through analysis. Also, they need to ensure that data collection and analysis processes serve the greater public interest.
 
 ```{r democracy}
-# Your code here
+mpg_category <- ifelse(Auto$mpg > 20, "High mpg", "Low mpg")
+
+predicted_origin <- ifelse(mpg_category == "High mpg", 1, 2)
+actual_origin <- Auto$origin
+
+# Create confusion matrix
+conf_matrix <- table(Predicted = predicted_origin, Actual = actual_origin)
+print(conf_matrix)
+
+n <- sum(conf_matrix)
+po <- sum(diag(conf_matrix)) / n  #observed
+pe <- sum(rowSums(conf_matrix) * colSums(conf_matrix)) / (n^2) #expected
+kappa_value <- (po - pe) / (1 - pe)
+print(paste("Kappa Value: ", kappa_value))
 ```
 
-> <span style="color:red;font-weight:bold">TODO</span>: Climate Change
+> Climate Change
+> For data scientists working on climate change, their responsibility involves using data to understand and mitigate the impacts of climate change like air pollution or greenhouse gas emissions. This even includes their effects on the environment and public health. The Clean Air Act is a good example as it sets standards for air pollutants that contribute to climate change. Data scientists can contribute by analyzing climate data to predict future environmental conditions.
 
 ```{r climate}
-# Your code here
+#ROC curve for high vs low mpg
+library(pROC)
+mpg_category <- ifelse(Auto$mpg > 20, 1, 0)  # 1 = high mpg, 0 = low mpg
+model <- glm(mpg_category ~ weight + horsepower + displacement, data = Auto, family = "binomial")
+roc_curve <- roc(mpg_category, predict(model, Auto, type = "response"))
+plot(roc_curve)
 ```
